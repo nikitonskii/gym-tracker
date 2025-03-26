@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { redirect } from 'next/navigation';
@@ -11,8 +11,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Plus, Trash2, Save } from 'lucide-react';
+import { CalendarIcon, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { useNotification } from '@/components/notification-provider';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 
 interface ExerciseInput {
   id: string;
@@ -22,15 +24,51 @@ interface ExerciseInput {
   weight: number;
 }
 
+interface SavedExercise {
+  _id: string;
+  name: string;
+  category: string;
+  defaultSets: number;
+  defaultReps: number;
+  defaultWeight: number;
+}
+
 export default function NewWorkoutPage() {
   const { status } = useSession();
   const router = useRouter();
+  const { showNotification } = useNotification();
   const [workoutName, setWorkoutName] = useState('');
   const [date, setDate] = useState<Date>(new Date());
   const [exercises, setExercises] = useState<ExerciseInput[]>([
     { id: crypto.randomUUID(), name: '', sets: 3, reps: 10, weight: 0 }
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [savedExercises, setSavedExercises] = useState<SavedExercise[]>([]);
+  const [isLoadingExercises, setIsLoadingExercises] = useState(true);
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      fetchSavedExercises();
+    }
+  }, [status]);
+
+  const fetchSavedExercises = async () => {
+    try {
+      setIsLoadingExercises(true);
+      const response = await fetch('/api/exercises');
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSavedExercises(data.exercises || []);
+      } else {
+        console.error('Failed to load exercises');
+      }
+    } catch (error) {
+      console.error('Error fetching exercises:', error);
+    } finally {
+      setIsLoadingExercises(false);
+    }
+  };
 
   if (status === 'loading') {
     return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
@@ -59,13 +97,43 @@ export default function NewWorkoutPage() {
     ));
   };
 
+  const selectSavedExercise = (exerciseId: string, targetId: string) => {
+    const savedExercise = savedExercises.find(ex => ex._id === exerciseId);
+    
+    if (savedExercise) {
+      setExercises(exercises.map(exercise => 
+        exercise.id === targetId 
+          ? { 
+              id: exercise.id, 
+              name: savedExercise.name, 
+              sets: savedExercise.defaultSets, 
+              reps: savedExercise.defaultReps, 
+              weight: savedExercise.defaultWeight 
+            } 
+          : exercise
+      ));
+    }
+  };
+
+  // Convert saved exercises to select options format
+  const getExerciseOptions = () => {
+    return savedExercises.map(exercise => ({
+      value: exercise._id,
+      label: exercise.name
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
     // Validate form
     if (!workoutName.trim() || exercises.some(ex => !ex.name.trim())) {
-      alert('Please fill in all exercise names and workout name');
+      showNotification(
+        "Please fill in all exercise names and workout name",
+        "error",
+        "Validation Error"
+      );
       setIsSubmitting(false);
       return;
     }
@@ -73,7 +141,11 @@ export default function NewWorkoutPage() {
     const workoutData = {
       name: workoutName,
       date: format(date, 'yyyy-MM-dd'),
-      exercises: exercises.map(({ id, ...rest }) => rest) // Remove temporary IDs
+      exercises: exercises.map(exercise => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { id, ...rest } = exercise;
+        return rest;
+      })
     };
     
     try {
@@ -84,6 +156,11 @@ export default function NewWorkoutPage() {
       });
       
       if (response.ok) {
+        showNotification(
+          "Workout created successfully",
+          "success",
+          "Success"
+        );
         router.push('/dashboard');
       } else {
         const error = await response.json();
@@ -91,7 +168,11 @@ export default function NewWorkoutPage() {
       }
     } catch (error) {
       console.error('Error creating workout:', error);
-      alert('Failed to save workout. Please try again.');
+      showNotification(
+        "Failed to save workout. Please try again.",
+        "error",
+        "Error"
+      );
       setIsSubmitting(false);
     }
   };
@@ -160,8 +241,25 @@ export default function NewWorkoutPage() {
                       key={exercise.id} 
                       className="grid grid-cols-12 gap-2 items-end border p-3 rounded-md"
                     >
-                      <div className="col-span-12 md:col-span-4 space-y-1">
-                        <Label htmlFor={`exercise-${index}`}>Exercise Name</Label>
+                      <div className="col-span-12 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <Label htmlFor={`exercise-${index}`}>Exercise Name</Label>
+                          {isLoadingExercises ? (
+                            <div className="flex items-center text-sm text-muted-foreground">
+                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              Loading...
+                            </div>
+                          ) : savedExercises.length > 0 ? (
+                            <div className="w-[200px]">
+                              <SearchableSelect
+                                options={getExerciseOptions()}
+                                value=""
+                                onChange={(value) => selectSavedExercise(value, exercise.id)}
+                                placeholder="Select exercise"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
                         <Input
                           id={`exercise-${index}`}
                           placeholder="e.g., Bench Press"

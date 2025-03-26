@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { redirect } from 'next/navigation';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,8 +21,20 @@ import {
 import Link from 'next/link';
 import { useNotification } from '@/components/notification-provider';
 
-export default function NewExercisePage() {
+interface Exercise {
+  _id: string;
+  name: string;
+  category: string;
+  defaultSets: number;
+  defaultReps: number;
+  defaultWeight: number;
+  notes?: string;
+}
+
+export default function EditExercisePage() {
   const router = useRouter();
+  const params = useParams();
+  const exerciseId = params.id as string;
   const { status } = useSession();
   const { showNotification } = useNotification();
   
@@ -32,7 +44,47 @@ export default function NewExercisePage() {
   const [defaultReps, setDefaultReps] = useState(10);
   const [defaultWeight, setDefaultWeight] = useState(0);
   const [notes, setNotes] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingExercise, setIsDeletingExercise] = useState(false);
+  
+  useEffect(() => {
+    if (status === 'authenticated' && exerciseId) {
+      fetchExercise(exerciseId);
+    }
+  }, [status, exerciseId]);
+  
+  const fetchExercise = async (id: string) => {
+    try {
+      const response = await fetch(`/api/exercises/${id}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        const exercise: Exercise = data.exercise;
+        
+        setName(exercise.name);
+        setCategory(exercise.category);
+        setDefaultSets(exercise.defaultSets);
+        setDefaultReps(exercise.defaultReps);
+        setDefaultWeight(exercise.defaultWeight);
+        setNotes(exercise.notes || '');
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to fetch exercise');
+      }
+    } catch (error) {
+      console.error('Error fetching exercise:', error);
+      showNotification(
+        "Failed to load exercise details",
+        "error",
+        "Error"
+      );
+      router.push('/exercises');
+    } finally {
+      setIsLoading(false);
+    }
+  };
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,8 +101,8 @@ export default function NewExercisePage() {
     setIsSubmitting(true);
     
     try {
-      const response = await fetch('/api/exercises', {
-        method: 'POST',
+      const response = await fetch(`/api/exercises/${exerciseId}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -66,18 +118,18 @@ export default function NewExercisePage() {
       
       if (response.ok) {
         showNotification(
-          "Exercise created successfully",
+          "Exercise updated successfully",
           "success",
           "Success"
         );
         router.push('/exercises');
       } else {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to create exercise');
+        throw new Error(data.error || 'Failed to update exercise');
       }
     } catch (error: unknown) {
-      console.error('Error creating exercise:', error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to create exercise";
+      console.error('Error updating exercise:', error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to update exercise";
       showNotification(
         errorMessage,
         "error",
@@ -88,7 +140,39 @@ export default function NewExercisePage() {
     }
   };
   
-  if (status === 'loading') {
+  const handleDeleteExercise = async () => {
+    setIsDeletingExercise(true);
+    
+    try {
+      const response = await fetch(`/api/exercises/${exerciseId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        showNotification(
+          "Exercise deleted successfully",
+          "success",
+          "Success"
+        );
+        router.push('/exercises');
+      } else {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to delete exercise');
+      }
+    } catch (error) {
+      console.error('Error deleting exercise:', error);
+      showNotification(
+        "Failed to delete exercise",
+        "error",
+        "Error"
+      );
+    } finally {
+      setIsDeletingExercise(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+  
+  if (status === 'loading' || isLoading) {
     return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
   }
   
@@ -106,12 +190,41 @@ export default function NewExercisePage() {
               Back
             </Link>
           </Button>
-          <h1 className="text-2xl font-bold">Create New Exercise</h1>
+          <h1 className="text-2xl font-bold">Edit Exercise</h1>
         </div>
         
         <Card>
-          <CardHeader>
-            <CardTitle>New Exercise</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle>Edit Exercise</CardTitle>
+            {!showDeleteConfirm ? (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="text-red-500 border-red-200 hover:bg-red-50 hover:text-red-600"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                Delete Exercise
+                <Trash2 className="ml-2 h-4 w-4" />
+              </Button>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setShowDeleteConfirm(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  size="sm" 
+                  onClick={handleDeleteExercise}
+                  disabled={isDeletingExercise}
+                >
+                  {isDeletingExercise ? 'Deleting...' : 'Confirm Delete'}
+                </Button>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -120,7 +233,7 @@ export default function NewExercisePage() {
                 <Input
                   id="name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                   placeholder="e.g., Bench Press, Squats, etc."
                   required
                 />
@@ -198,7 +311,7 @@ export default function NewExercisePage() {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? 'Saving...' : 'Save Exercise'}
+                  {isSubmitting ? 'Saving...' : 'Update Exercise'}
                   <Save className="ml-2 h-4 w-4" />
                 </Button>
               </CardFooter>

@@ -11,8 +11,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Plus, Trash2, Save } from 'lucide-react';
+import { CalendarIcon, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 import { format, parse } from 'date-fns';
+import { useNotification } from '@/components/notification-provider';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 
 interface ExerciseInput {
   id: string;
@@ -20,6 +22,18 @@ interface ExerciseInput {
   sets: number;
   reps: number;
   weight: number;
+  completed?: boolean;
+  actualReps?: number;
+  actualWeight?: number;
+}
+
+interface SavedExercise {
+  _id: string;
+  name: string;
+  category: string;
+  defaultSets: number;
+  defaultReps: number;
+  defaultWeight: number;
 }
 
 export default function EditWorkoutPage() {
@@ -27,16 +41,24 @@ export default function EditWorkoutPage() {
   const router = useRouter();
   const params = useParams();
   const workoutId = params.id as string;
+  const { showNotification } = useNotification();
   
   const [workoutName, setWorkoutName] = useState('');
   const [date, setDate] = useState<Date>(new Date());
   const [exercises, setExercises] = useState<ExerciseInput[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeletingWorkout, setIsDeletingWorkout] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [savedExercises, setSavedExercises] = useState<SavedExercise[]>([]);
+  const [isLoadingExercises, setIsLoadingExercises] = useState(true);
 
   useEffect(() => {
     if (status === 'authenticated' && workoutId) {
       fetchWorkout(workoutId);
+    }
+    if (status === 'authenticated') {
+      fetchSavedExercises();
     }
   }, [status, workoutId]);
 
@@ -49,12 +71,23 @@ export default function EditWorkoutPage() {
         
         setWorkoutName(workout.name);
         setDate(parse(workout.date, 'yyyy-MM-dd', new Date()));
-        setExercises(workout.exercises.map((ex: any) => ({
+        setExercises(workout.exercises.map((ex: {
+          name: string;
+          sets: number;
+          reps: number;
+          weight: number;
+          completed?: boolean;
+          actualReps?: number;
+          actualWeight?: number;
+        }) => ({
           id: crypto.randomUUID(),
           name: ex.name,
           sets: ex.sets,
           reps: ex.reps,
-          weight: ex.weight
+          weight: ex.weight,
+          completed: ex.completed || false,
+          actualReps: ex.actualReps || ex.reps,
+          actualWeight: ex.actualWeight || ex.weight
         })));
       } else {
         console.error('Failed to fetch workout');
@@ -65,6 +98,24 @@ export default function EditWorkoutPage() {
       router.push('/dashboard');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchSavedExercises = async () => {
+    try {
+      setIsLoadingExercises(true);
+      const response = await fetch('/api/exercises');
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSavedExercises(data.exercises || []);
+      } else {
+        console.error('Failed to load exercises');
+      }
+    } catch (error) {
+      console.error('Error fetching exercises:', error);
+    } finally {
+      setIsLoadingExercises(false);
     }
   };
 
@@ -89,10 +140,28 @@ export default function EditWorkoutPage() {
     }
   };
 
-  const updateExercise = (id: string, field: keyof ExerciseInput, value: string | number) => {
+  const updateExercise = (id: string, field: keyof ExerciseInput, value: string | number | boolean) => {
     setExercises(exercises.map(exercise => 
       exercise.id === id ? { ...exercise, [field]: value } : exercise
     ));
+  };
+
+  const selectSavedExercise = (exerciseId: string, targetId: string) => {
+    const savedExercise = savedExercises.find(ex => ex._id === exerciseId);
+    
+    if (savedExercise) {
+      setExercises(exercises.map(exercise => 
+        exercise.id === targetId 
+          ? { 
+              ...exercise,
+              name: savedExercise.name, 
+              sets: savedExercise.defaultSets, 
+              reps: savedExercise.defaultReps, 
+              weight: savedExercise.defaultWeight 
+            } 
+          : exercise
+      ));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -101,7 +170,11 @@ export default function EditWorkoutPage() {
     
     // Validate form
     if (!workoutName.trim() || exercises.some(ex => !ex.name.trim())) {
-      alert('Please fill in all exercise names and workout name');
+      showNotification(
+        "Please fill in all exercise names and workout name", 
+        "error", 
+        "Validation Error"
+      );
       setIsSubmitting(false);
       return;
     }
@@ -109,7 +182,11 @@ export default function EditWorkoutPage() {
     const workoutData = {
       name: workoutName,
       date: format(date, 'yyyy-MM-dd'),
-      exercises: exercises.map(({ id, ...rest }) => rest) // Remove temporary IDs
+      exercises: exercises.map(exercise => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { id, ...rest } = exercise;
+        return rest;
+      })
     };
     
     try {
@@ -120,6 +197,11 @@ export default function EditWorkoutPage() {
       });
       
       if (response.ok) {
+        showNotification(
+          "Workout updated successfully",
+          "success",
+          "Success"
+        );
         router.push('/dashboard');
       } else {
         const error = await response.json();
@@ -127,17 +209,89 @@ export default function EditWorkoutPage() {
       }
     } catch (error) {
       console.error('Error updating workout:', error);
-      alert('Failed to update workout. Please try again.');
+      showNotification(
+        "Failed to update workout. Please try again.",
+        "error",
+        "Error"
+      );
       setIsSubmitting(false);
     }
+  };
+
+  const handleDeleteWorkout = async () => {
+    setIsDeletingWorkout(true);
+    
+    try {
+      const response = await fetch(`/api/workouts/${workoutId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        showNotification(
+          "Workout deleted successfully", 
+          "success", 
+          "Success"
+        );
+        router.push('/dashboard');
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to delete workout');
+      }
+    } catch (error) {
+      console.error('Error deleting workout:', error);
+      showNotification(
+        "Failed to delete workout. Please try again.",
+        "error",
+        "Error"
+      );
+      setIsDeletingWorkout(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  // Convert saved exercises to select options format
+  const getExerciseOptions = () => {
+    return savedExercises.map(exercise => ({
+      value: exercise._id,
+      label: exercise.name
+    }));
   };
 
   return (
     <DashboardLayout>
       <div className="p-4 md:p-6 lg:p-8">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle>Edit Workout</CardTitle>
+            {!showDeleteConfirm ? (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="text-red-500 border-red-200 hover:bg-red-50 hover:text-red-600"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                Delete Workout
+                <Trash2 className="ml-2 h-4 w-4" />
+              </Button>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setShowDeleteConfirm(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  size="sm" 
+                  onClick={handleDeleteWorkout}
+                  disabled={isDeletingWorkout}
+                >
+                  {isDeletingWorkout ? 'Deleting...' : 'Confirm Delete'}
+                </Button>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -194,7 +348,24 @@ export default function EditWorkoutPage() {
                     <div key={exercise.id} className="border rounded-md p-4 space-y-4">
                       <div className="grid grid-cols-12 gap-4">
                         <div className="col-span-12 space-y-1">
-                          <Label htmlFor={`name-${index}`}>Exercise Name</Label>
+                          <div className="flex justify-between items-center">
+                            <Label htmlFor={`name-${index}`}>Exercise Name</Label>
+                            {isLoadingExercises ? (
+                              <div className="flex items-center text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                Loading...
+                              </div>
+                            ) : savedExercises.length > 0 ? (
+                              <div className="w-[200px]">
+                                <SearchableSelect
+                                  options={getExerciseOptions()}
+                                  value=""
+                                  onChange={(value) => selectSavedExercise(value, exercise.id)}
+                                  placeholder="Select exercise"
+                                />
+                              </div>
+                            ) : null}
+                          </div>
                           <Input
                             id={`name-${index}`}
                             value={exercise.name}

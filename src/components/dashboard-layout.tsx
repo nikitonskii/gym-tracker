@@ -3,7 +3,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import {  Dumbbell, LogOut, 
-  Users, Home, PlusCircle 
+  Home, PlusCircle, UserCircle 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -57,12 +57,12 @@ export default function DashboardLayout({
                 <Dumbbell className="mr-2 h-4 w-4" />
                 Exercises
               </Link>
-              <Link href="/friends" className={cn(
+              <Link href="/account" className={cn(
                 "flex items-center px-3 py-2 text-sm rounded-md",
-                pathname.startsWith("/friends") ? "bg-accent" : "hover:bg-accent/50"
+                pathname.startsWith("/account") ? "bg-accent" : "hover:bg-accent/50"
               )}>
-                <Users className="mr-2 h-4 w-4" />
-                Friends
+                <UserCircle className="mr-2 h-4 w-4" />
+                Account
               </Link>
               <Button
                 variant="ghost"
@@ -101,12 +101,12 @@ export default function DashboardLayout({
             <Dumbbell className="h-5 w-5" />
             <span className="text-xs mt-1">Exercises</span>
           </Link>
-          <Link href="/friends" className={cn(
+          <Link href="/account" className={cn(
             "flex flex-col items-center p-2 rounded-md",
-            pathname.startsWith("/friends") ? "text-primary" : "text-muted-foreground"
+            pathname.startsWith("/account") ? "text-primary" : "text-muted-foreground"
           )}>
-            <Users className="h-5 w-5" />
-            <span className="text-xs mt-1">Friends</span>
+            <UserCircle className="h-5 w-5" />
+            <span className="text-xs mt-1">Account</span>
           </Link>
         </div>
       </div>
